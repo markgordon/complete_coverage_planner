@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "full_coverage_path_planner/common.hpp"
+#include "complete_coverage_planner/common.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <angles/angles.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -47,7 +47,7 @@ enum
   eDirDown = -2,
 };
 
-namespace full_coverage_path_planner
+namespace complete_coverage_planner
 {
   class FullCoveragePathPlanner
   {
@@ -105,7 +105,7 @@ namespace full_coverage_path_planner
       q.setRPY(0, 0, yaw);
       return tf2::toMsg(q);
     }
-    nav2_util::LifecycleNode::SharedPtr node_;
+    rclcpp::Node * node_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr plan_pub_;
     float robot_radius_;
     float tool_radius_;

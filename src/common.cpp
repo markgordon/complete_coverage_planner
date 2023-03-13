@@ -7,7 +7,7 @@
 #include <list>
 #include <vector>
 
-#include <full_coverage_path_planner/common.hpp>
+#include <complete_coverage_planner/common.hpp>
 
 int distanceToClosestPoint(Point_t poi, std::list<Point_t> const& goals)
 {

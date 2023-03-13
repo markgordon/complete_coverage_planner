@@ -4,7 +4,7 @@
 #include <list>
 #include <vector>
 
-#include "full_coverage_path_planner/full_coverage_path_planner.hpp"
+#include "complete_coverage_planner/full_coverage_path_planner.hpp"
 
 /*  *** Note the coordinate system ***
  *  grid[][] is a 2D-vector:
@@ -30,7 +30,7 @@
 // #define DEBUG_PLOT
 
 // Default Constructor
-namespace complete_coverage
+namespace complete_coverage_planner
 {
   FullCoveragePathPlanner::FullCoveragePathPlanner() : initialized_(false)
   {

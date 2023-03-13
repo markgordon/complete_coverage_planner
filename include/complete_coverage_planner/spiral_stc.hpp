@@ -12,7 +12,7 @@
 #include <vector>
 
 // #include <pluginlib/class_list_macros.h>
-#include "full_coverage_path_planner/full_coverage_path_planner.hpp"
+#include "complete_coverage_planner/full_coverage_path_planner.hpp"
 #include "nav2_core/global_planner.hpp"
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "nav2_util/lifecycle_node.hpp"
@@ -26,9 +26,9 @@
 
 using namespace std::chrono_literals;
 using std::string;
-namespace full_coverage_path_planner
+namespace complete_coverage_planner
 {
-  class SpiralSTC : public nav2_core::GlobalPlanner , private full_coverage_path_planner::FullCoveragePathPlanner
+  class SpiralSTC : private complete_coverage_planner::FullCoveragePathPlanner
   {
   public:
     /**
@@ -49,24 +49,24 @@ namespace full_coverage_path_planner
      * @param costmap_ros Costmap2DROS object
     */
     void configure(
-        const rclcpp_lifecycle::LifecycleNode::WeakPtr &parent,
+        rclcpp::Node *node,
         std::string name, std::shared_ptr<tf2_ros::Buffer> tf,
-        std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros) override;
+        std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros);
 
     /**
      * @brief Cleanup lifecycle node
      */
-    void cleanup() override;
+    void cleanup() ;
 
     /**
      * @brief Activate lifecycle node
      */
-    void activate() override;
+    void activate() ;
 
     /**
      * @brief Deactivate lifecycle node
      */
-    void deactivate() override;
+    void deactivate() ;
 
     /**
      * @brief Creating a plan from start and goal poses
@@ -75,8 +75,7 @@ namespace full_coverage_path_planner
      * @return nav_msgs::Path of the generated path
      */
     nav_msgs::msg::Path createPlan(
-        const geometry_msgs::msg::PoseStamped &start,
-        const geometry_msgs::msg::PoseStamped &goal) override;
+        const geometry_msgs::msg::PoseStamped &start);
 
   protected:
     /**
@@ -86,7 +85,7 @@ namespace full_coverage_path_planner
      * @param plan The plan... filled by the planner
      * @return True if a valid plan was found, false otherwise
      */
-    bool makePlan(const geometry_msgs::msg::PoseStamped &start, const geometry_msgs::msg::PoseStamped &goal,
+    bool makePlan(const geometry_msgs::msg::PoseStamped &start, 
                   std::vector<geometry_msgs::msg::PoseStamped> &plan);
 
     /**
@@ -119,6 +118,6 @@ namespace full_coverage_path_planner
                                          int &multiple_pass_counter,
                                          int &visited_counter);
   };
-  geometry_msgs::msg::PoseStamped start_;
-  nav_msgs::msg::Path global_path_;
+  //geometry_msgs::msg::PoseStamped start_;
+  //nav_msgs::msg::Path global_path_;
 }  // namespace full_coverage_path_planner

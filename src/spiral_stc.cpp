@@ -7,10 +7,10 @@
 #include <string>
 #include <vector>
 
-#include "full_coverage_path_planner/spiral_stc.hpp"
+#include "complete_coverage_planner/spiral_stc.hpp"
 
 using nav2_util::declare_parameter_if_not_declared;
-namespace full_coverage_path_planner
+namespace complete_coverage_planner
 {
   SpiralSTC::SpiralSTC()
   {
@@ -23,23 +23,20 @@ namespace full_coverage_path_planner
   }
 
   void SpiralSTC::configure(
-      const rclcpp_lifecycle::LifecycleNode::WeakPtr &parent,
+      rclcpp::Node * node,
       std::string name, std::shared_ptr<tf2_ros::Buffer> tf,
       std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros)
   {
     if (!initialized_)
     {
       // Get node from parent
-      node_ = parent.lock();
+      node_ = node;
       name_ = name;
 
       // Currently this plugin does not use the costmap, instead request a map from a server
       // This will change in the future
       costmap_ = costmap_ros->getCostmap();
       global_frame_ = costmap_ros->getGlobalFrameID();
-
-      RCLCPP_INFO(rclcpp::get_logger("FullCoveragePathPlanner"),
-                  "Configuring plugin %s of type NavfnPlanner", name_.c_str());
 
       // Create a publisher to visualize the plan
       plan_pub_ = node_->create_publisher<nav_msgs::msg::Path>("plan", 1);
@@ -56,43 +53,13 @@ namespace full_coverage_path_planner
     }
   }
 
-  void SpiralSTC::activate()
+  nav_msgs::msg::Path SpiralSTC::createPlan(const geometry_msgs::msg::PoseStamped & start)
   {
-    RCLCPP_INFO(
-      rclcpp::get_logger("FullCoveragePathPlanner"), "Activating plugin %s of type FullCoveragePathPlanner",
-      name_.c_str());
-  }
-
-  void SpiralSTC::deactivate()
-  {
-    RCLCPP_INFO(
-      rclcpp::get_logger("FullCoveragePathPlanner"), "Deactivating plugin %s of type FullCoveragePathPlanner",
-      name_.c_str());
-  }
-
-  void SpiralSTC::cleanup()
-  {
-    RCLCPP_INFO(
-      rclcpp::get_logger("FullCoveragePathPlanner"), "Cleaning up plugin %s of type FullCoveragePathPlanner",
-      name_.c_str());
-    // TODO(clopez) Add proper cleanup
-  }
-
-  nav_msgs::msg::Path SpiralSTC::createPlan(
-    const geometry_msgs::msg::PoseStamped & start,
-    const geometry_msgs::msg::PoseStamped & goal)
-  {
-    //First check to see if this is a repeat requeust, as the initial global plan should have been sufficient ... and constantly 
-    //replanning causes the path to fail.
-    if(start_ != goal){
-      start_ = goal;
-    }else return global_path_;
     nav_msgs::msg::Path global_path;
-    SpiralSTC::makePlan(start, goal, global_path.poses);
+    SpiralSTC::makePlan(start, global_path.poses);
     global_path.header.stamp = node_->now();
     global_path.header.frame_id = global_frame_;
     //save since we are going to just return the same path
-    global_path_ = global_path;
     return global_path;
   }
   std::list<gridNode_t> SpiralSTC::spiral(std::vector<std::vector<bool>> const &grid, std::list<gridNode_t> &init,
@@ -269,7 +236,7 @@ namespace full_coverage_path_planner
     return fullPath;
   }
 
-  bool SpiralSTC::makePlan(const geometry_msgs::msg::PoseStamped &start, const geometry_msgs::msg::PoseStamped &goal,
+  bool SpiralSTC::makePlan(const geometry_msgs::msg::PoseStamped &start,
                            std::vector<geometry_msgs::msg::PoseStamped> &plan)
   {
     if (!initialized_)
@@ -330,7 +297,3 @@ namespace full_coverage_path_planner
     return true;
   }
 } // namespace full_coverage_path_planner
-
-// register this planner as a nav2_core::GlobalPlanner plugin
-#include <pluginlib/class_list_macros.hpp>
-PLUGINLIB_EXPORT_CLASS(full_coverage_path_planner::SpiralSTC, nav2_core::GlobalPlanner)

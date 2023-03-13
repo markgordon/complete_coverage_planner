@@ -10,11 +10,11 @@ add_executable(${PROJECT_NAME}
   src/${PROJECT_NAME}.cpp
   src/spiral_stc.cpp
   src/full_coverage_path_planner.cpp
+  src/costmap_client.cpp
 )
 
 include_directories(
     include
-#    test/include
 )
 add_definitions(${EIGEN3_DEFINITIONS})
 
