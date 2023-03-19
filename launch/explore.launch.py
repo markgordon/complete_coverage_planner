@@ -11,8 +11,15 @@ from launch.substitutions import LaunchConfiguration
 def generate_launch_description():
     ld = LaunchDescription()
     config = os.path.join(
-        get_package_share_directory("complete_coverage_planner"), "config", "params.yaml"
+        get_package_share_directory("complete_coverage_planner"), "config", "params_costmap.yaml"
     )
+    log_level_arg = DeclareLaunchArgument(
+        "log-level",
+        default_value=["debug"],
+        description="Logging level",
+    )
+    log_level = LaunchConfiguration("log-level")
+
     use_sim_time = LaunchConfiguration("use_sim_time")
     namespace = LaunchConfiguration("namespace")
 
@@ -32,13 +39,19 @@ def generate_launch_description():
     remappings = [("/tf", "tf"), ("/tf_static", "tf_static")]
 
     node = Node(
-        package="complete_coverage_node",
-        name="complete_coverage_node",
+        package="complete_coverage_planner",
+        name="complete_coverage_planner",
         namespace=namespace,
-        executable="explore",
+        executable="complete_coverage_planner",
         parameters=[config, {"use_sim_time": use_sim_time}],
         output="screen",
         remappings=remappings,
+        arguments= [
+            "--ros-args",
+            "--log-level",
+            ["complete_coverage_planner:=", log_level],
+        ],
+       # prefix=["gdbserver localhost:3000"],
     )
     ld.add_action(declare_use_sim_time_argument)
     ld.add_action(declare_namespace_argument)

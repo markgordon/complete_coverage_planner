@@ -50,8 +50,9 @@ namespace complete_coverage_planner
     */
     void configure(
         rclcpp::Node *node,
-        std::string name, std::shared_ptr<tf2_ros::Buffer> tf,
-        std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros);
+        std::string name,
+        nav2_costmap_2d::Costmap2D * costmap_ros,
+        std::string global_frame_id);
 
     /**
      * @brief Cleanup lifecycle node

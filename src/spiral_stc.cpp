@@ -6,7 +6,7 @@
 #include <list>
 #include <string>
 #include <vector>
-
+#include <signal.h>
 #include "complete_coverage_planner/spiral_stc.hpp"
 
 using nav2_util::declare_parameter_if_not_declared;
@@ -24,8 +24,9 @@ namespace complete_coverage_planner
 
   void SpiralSTC::configure(
       rclcpp::Node * node,
-      std::string name, std::shared_ptr<tf2_ros::Buffer> tf,
-      std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros)
+      std::string name,
+      nav2_costmap_2d::Costmap2D * costmap_ros,
+      std::string global_frame_id)
   {
     if (!initialized_)
     {
@@ -35,8 +36,8 @@ namespace complete_coverage_planner
 
       // Currently this plugin does not use the costmap, instead request a map from a server
       // This will change in the future
-      costmap_ = costmap_ros->getCostmap();
-      global_frame_ = costmap_ros->getGlobalFrameID();
+      costmap_ = costmap_ros;
+      global_frame_ = global_frame_id;
 
       // Create a publisher to visualize the plan
       plan_pub_ = node_->create_publisher<nav_msgs::msg::Path>("plan", 1);
@@ -285,14 +286,14 @@ namespace complete_coverage_planner
     // TODO(CesarLopez): Check if global path should be calculated repetitively or just kept
     // (also controlled by planner_frequency parameter in move_base namespace)
 
-    RCLCPP_INFO(rclcpp::get_logger("FullCoveragePathPlanner"), "Publishing plan!");
-    publishPlan(plan);
-    RCLCPP_INFO(rclcpp::get_logger("FullCoveragePathPlanner"), "Plan published!");
-    RCLCPP_DEBUG(rclcpp::get_logger("FullCoveragePathPlanner"), "Plan published");
+    //publishPlan(plan);
+    RCLCPP_INFO(rclcpp::get_logger("FullCoveragePathPlanner"), "Plan published");
+    //raise(SIGTRAP); 
 
     clock_t end = clock();
     double elapsed_secs = static_cast<double>(end - begin) / CLOCKS_PER_SEC;
-    std::cout << "elapsed time: " << elapsed_secs << "\n";
+    RCLCPP_DEBUG(rclcpp::get_logger("FullCoveragePathPlanner"), "elapsed time: %lf",  elapsed_secs);
+    RCLCPP_DEBUG(rclcpp::get_logger("FullCoveragePathPlanner"), "elapsed time: %lf",  elapsed_secs);
 
     return true;
   }

@@ -1,6 +1,7 @@
 #include "complete_coverage_planner/complete_coverage_planner.hpp"
 #include "complete_coverage_planner/spiral_stc.hpp"
 #include <thread>
+#include <mutex>
 
 inline static bool same_point(const geometry_msgs::msg::Point& one,
                               const geometry_msgs::msg::Point& two)
@@ -33,87 +34,156 @@ CompleteCoverage::CompleteCoverage()
       rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(
           this, ACTION_NAME);
 
-  SpiralSTC spiral_path_builder;
-  spiral_path_builder.configure(this,"complete_coverage_planner",tf_buffer_,costmap_client_.getCostmap());
-
   if (visualize) {
     marker_array_publisher_ =
-        this->create_publisher<visualization_msgs::msg::MarkerArray>("complete_coverage/"
-                                                                     "frontier"
+        this->create_publisher<visualization_msgs::msg::MarkerArray>("complete_coverage_planner/"
+                                                                     "path"
                                                                      "s",
                                                                      10);
   }
-
-  // Subscription to resume or stop exploration
+  // Subscription to pause or resume complete coverage path, does nothing until plan started
   resume_subscription_ = this->create_subscription<std_msgs::msg::Bool>(
       "complete_coverage/resume", 10,
       std::bind(&CompleteCoverage::resumeCallback, this, std::placeholders::_1));
+  // Topic to stop and start processing new path
+  stop_subscription_ = this->create_subscription<std_msgs::msg::Bool>(
+      "complete_coverage/start", 10,
+      std::bind(&CompleteCoverage::start, this, std::placeholders::_1));
 
   RCLCPP_INFO(logger_, "Waiting to connect to move_base nav2 server");
   move_base_client_->wait_for_action_server();
   RCLCPP_INFO(logger_, "Connected to move_base nav2 server");
+  map_frame_ = costmap_client_.getGlobalFrameID();
 
   if (return_to_init_) {
     RCLCPP_INFO(logger_, "Getting initial pose of the robot");
     geometry_msgs::msg::TransformStamped transformStamped;
-    std::string map_frame = costmap_client_.getGlobalFrameID();
     try {
       transformStamped = tf_buffer_.lookupTransform(
-          map_frame, robot_base_frame_, tf2::TimePointZero);
-      initial_pose_.position.x = transformStamped.transform.translation.x;
-      initial_pose_.position.y = transformStamped.transform.translation.y;
-      initial_pose_.orientation = transformStamped.transform.rotation;
+          map_frame_, robot_base_frame_, tf2::TimePointZero);
+      initial_pose_.pose.position.x = transformStamped.transform.translation.x;
+      initial_pose_.pose.position.y = transformStamped.transform.translation.y;
+      initial_pose_.pose.orientation = transformStamped.transform.rotation;
+      initial_pose_.header = transformStamped.header;
     } catch (tf2::TransformException& ex) {
       RCLCPP_ERROR(logger_, "Couldn't find transform from %s to %s: %s",
-                   map_frame.c_str(), robot_base_frame_.c_str(), ex.what());
+                   map_frame_.c_str(), robot_base_frame_.c_str(), ex.what());
       return_to_init_ = false;
     }
   }
+  try{
+    while(1) {
+      if(start_) makePlan();
+      else {
+        std::mutex lk;
+        std::unique_lock<std::mutex> ulk(lk);
+        start_condition_.wait(ulk);
+      }
+    }
+  }catch(const std::exception &e){
+    RCLCPP_ERROR(logger_, "Exception while planning %s",e.what());
+  }
 
+}
+
+void CompleteCoverage::makePlan()
+{
+  SpiralSTC spiral_path_builder;
+  
+  spiral_path_builder.configure(this,"complete_coverage_planner",costmap_client_.getCostmap(),map_frame_);
+  //This creates the complete coverage path
+  nav_msgs::msg::Path complete_path = spiral_path_builder.createPlan(initial_pose_);
+  //Now we have to feed the waypoints in one at a time so our "smart" path planner doesn't shortcut tracks
+  
+  RCLCPP_DEBUG(logger_, "total poses %d",complete_path.poses.size());
+
+  for(auto waypoint: complete_path.poses)
+  {
+    std::mutex lk;
+    std::unique_lock<std::mutex> ulk(lk);
+    //if stopped mid path
+    if(!start_){
+      RCLCPP_DEBUG(logger_, "stop set, stopping");
+      stop();
+      return;
+    }
+    //pause feature
+    while(!continue_){
+      RCLCPP_DEBUG(logger_, "pause set, waiting for continue");
+      continue_condition_.wait(ulk);
+    }
+    //save for debug logging
+    prev_goal_ = waypoint.pose.position;  
+    RCLCPP_DEBUG(logger_, "Sending next goal to move base nav2");
+    auto goal = nav2_msgs::action::NavigateToPose::Goal();
+    goal.pose.pose = waypoint.pose;
+    goal.pose.header.frame_id = map_frame_;
+    goal.pose.header.stamp = this->now();
+    auto send_goal_options =
+        rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
+    send_goal_options.result_callback =
+      std::bind(&CompleteCoverage::reachedGoal, this, _1);
+    move_base_client_->async_send_goal(goal, send_goal_options);
+
+    //now wait for some response from the action, hopefully goal completed
+    while(waypoint_status_ == rclcpp_action::ResultCode::UNKNOWN)
+    {
+      continue_condition_.wait(ulk);
+    }
+    switch(waypoint_status_)
+    {
+      //continue processing waypoints
+        case rclcpp_action::ResultCode::SUCCEEDED:
+          break;
+        case rclcpp_action::ResultCode::ABORTED:
+        case rclcpp_action::ResultCode::CANCELED:
+        case rclcpp_action::ResultCode::UNKNOWN:
+        //quite and move to start if requested
+          stop();
+        //wait for new start to replan and start again
+          start_ = false;
+          return;
+    }
+  }
+  if(return_to_init_)returnToInitialPose();
 }
 void CompleteCoverage::resumeCallback(const std_msgs::msg::Bool::SharedPtr msg)
 {
-  if (msg->data) {
-    resume();
-  } else {
-    stop();
-  }
+
+    continue_=msg->data;
+    RCLCPP_INFO(logger_,"Resume set to %s",continue_ ?"true":"false");
+    //if this is an resume, notify any waits
+    if(continue_) continue_condition_.notify_all();
 }
 
+void CompleteCoverage::start(const std_msgs::msg::Bool::SharedPtr msg)
+{
+  start_ = msg->data;
+  std::string starting;
+  if(start_) starting = "starting.";
+  else starting = "stopping.";
+  RCLCPP_INFO(logger_, "Exploration %s",start_?"true":"false");
+  //if starting signal
+  if(start_){
+    start_condition_.notify_all();
+  }
+}
 CompleteCoverage::~CompleteCoverage()
 {
   stop();
 }
 
 
-void CompleteCoverage::makePlan()
+void CompleteCoverage::feedbackCallback(CompleteCoverage::SharedPtr,const std::shared_ptr<const NavigateToPose::Feedback> feedback)
 {
-  // find frontiers
-  auto pose = costmap_client_.getRobotPose();
-  // ensure only first call of makePlan was set resuming to true
-  if (resuming_) {
-    resuming_ = false;
-  }
-  RCLCPP_DEBUG(logger_, "Sending goal to move base nav2");
-
-  // send goal to move_base if we have something new to pursue
-  auto goal = nav2_msgs::action::NavigateToPose::Goal();
-  //goal.pose.pose.position = target_position;
-  goal.pose.pose.orientation.w = 1.;
-  goal.pose.header.frame_id = costmap_client_.getGlobalFrameID();
-  goal.pose.header.stamp = this->now();
-
-  auto send_goal_options =
-      rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
-  move_base_client_->async_send_goal(goal, send_goal_options);
+  RCLCPP_INFO(get_logger(), "Distance remaining = %f", feedback->distance_remaining);
 }
-
 void CompleteCoverage::returnToInitialPose()
 {
   RCLCPP_INFO(logger_, "Returning to initial pose.");
   auto goal = nav2_msgs::action::NavigateToPose::Goal();
-  goal.pose.pose.position = initial_pose_.position;
-  goal.pose.pose.orientation = initial_pose_.orientation;
+  goal.pose.pose.position = initial_pose_.pose.position;
+  goal.pose.pose.orientation = initial_pose_.pose.orientation;
   goal.pose.header.frame_id = costmap_client_.getGlobalFrameID();
   goal.pose.header.stamp = this->now();
 
@@ -122,64 +192,39 @@ void CompleteCoverage::returnToInitialPose()
   move_base_client_->async_send_goal(goal, send_goal_options);
 }
 
-void CompleteCoverage::reachedGoal(const NavigationGoalHandle::WrappedResult& result,
-                          const geometry_msgs::msg::Point& frontier_goal)
+void CompleteCoverage::reachedGoal(const NavigationGoalHandle::WrappedResult& result)
 {
+  waypoint_status_ = result.code;
   switch (result.code) {
+
+    RCLCPP_DEBUG(logger_, "Status received for point: x:%lf,y:%lf,z:%lf",prev_goal_.x,prev_goal_.y,prev_goal_.z);
     case rclcpp_action::ResultCode::SUCCEEDED:
-      RCLCPP_DEBUG(logger_, "Goal was successful");
+      RCLCPP_INFO(logger_, "Goal was successful");
       break;
     case rclcpp_action::ResultCode::ABORTED:
-      RCLCPP_DEBUG(logger_, "Goal was aborted");
-      RCLCPP_DEBUG(logger_, "Adding current goal to black list");
+      RCLCPP_INFO(logger_, "Goal was aborted");
       // If it was aborted probably because we've found another frontier goal,
       // so just return and don't make plan again
       return;
     case rclcpp_action::ResultCode::CANCELED:
-      RCLCPP_DEBUG(logger_, "Goal was canceled");
+      RCLCPP_INFO(logger_, "Goal was canceled");
       // If goal canceled might be because exploration stopped from topic. Don't make new plan.
       return;
     default:
+    //OK, so since we are in an unknown state but we did get a response, conservatively cancel the operation
+      waypoint_status_ =  rclcpp_action::ResultCode::CANCELED;
       RCLCPP_WARN(logger_, "Unknown result code from move base nav2");
       break;
   }
-  // find new goal immediately regardless of planning frequency.
-  // execute via timer to prevent dead lock in move_base_client (this is
-  // callback for sendGoal, which is called in makePlan). the timer must live
-  // until callback is executed.
-  // oneshot_ = relative_nh_.createTimer(
-  //     ros::Duration(0, 0), [this](const ros::TimerEvent&) { makePlan(); },
-  //     true);
-
-  // Because of the 1-thread-executor nature of ros2 I think timer is not
-  // needed.
-  makePlan();
 }
 
-void CompleteCoverage::start()
-{
-  RCLCPP_INFO(logger_, "Exploration started.");
-}
 
-void CompleteCoverage::stop(bool finished_exploring)
+void CompleteCoverage::stop()
 {
   RCLCPP_INFO(logger_, "Exploration stopped.");
-  move_base_client_->async_cancel_all_goals();
-  exploring_timer_->cancel();
-
-  if (return_to_init_ && finished_exploring) {
+  if (return_to_init_) {
     returnToInitialPose();
   }
-}
-
-void CompleteCoverage::resume()
-{
-  resuming_ = true;
-  RCLCPP_INFO(logger_, "Exploration resuming.");
-  // Reactivate the timer
-  exploring_timer_->reset();
-  // Resume immediately
-  exploring_timer_->execute_callback();
 }
 
 }  // namespace complete_coverage

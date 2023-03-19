@@ -55,9 +55,9 @@ Costmap2DClient::Costmap2DClient(rclcpp::Node& node, const tf2_ros::Buffer* tf)
   std::string costmap_topic;
   std::string costmap_updates_topic;
 
-  node_.declare_parameter<std::string>("costmap_topic", std::string("costmap"));
+  node_.declare_parameter<std::string>("costmap_topic", std::string("/global_costmap/costmap"));
   node_.declare_parameter<std::string>("costmap_updates_topic",
-                                       std::string("costmap_updates"));
+                                       std::string("/global_costmap/costmap_updates"));
   node_.declare_parameter<std::string>("robot_base_frame", std::string("base_"
                                                                        "link"));
   // transform tolerance is used for all tf transforms here
@@ -127,13 +127,14 @@ Costmap2DClient::Costmap2DClient(rclcpp::Node& node, const tf2_ros::Buffer* tf)
     // accumulation.
     tf_error.clear();
   }
+  RCLCPP_INFO(node_.get_logger(),
+            "coverage costmap congifured: ");
 }
 
 void Costmap2DClient::updateFullMap(
     const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
   global_frame_ = msg->header.frame_id;
-  auto costmap = costmap_->getCostmap();
   unsigned int size_in_cells_x = msg->info.width;
   unsigned int size_in_cells_y = msg->info.height;
   double resolution = msg->info.resolution;
@@ -142,16 +143,16 @@ void Costmap2DClient::updateFullMap(
 
   RCLCPP_DEBUG(node_.get_logger(), "received full new map, resizing to: %d, %d",
                size_in_cells_x, size_in_cells_y);
-  costmap->resizeMap(size_in_cells_x, size_in_cells_y, resolution, origin_x,
+  costmap_.resizeMap(size_in_cells_x, size_in_cells_y, resolution, origin_x,
                      origin_y);
 
   // lock as we are accessing raw underlying map
-  auto* mutex = costmap->getMutex();
+  auto* mutex = costmap_.getMutex();
   std::lock_guard<nav2_costmap_2d::Costmap2D::mutex_t> lock(*mutex);
 
   // fill map with data
-  unsigned char* costmap_data = costmap->getCharMap();
-  size_t costmap_size = costmap->getSizeInCellsX() * costmap->getSizeInCellsY();
+  unsigned char* costmap_data = costmap_.getCharMap();
+  size_t costmap_size = costmap_.getSizeInCellsX() * costmap_.getSizeInCellsY();
   RCLCPP_DEBUG(node_.get_logger(), "full map update, %lu values", costmap_size);
   for (size_t i = 0; i < costmap_size && i < msg->data.size(); ++i) {
     unsigned char cell_cost = static_cast<unsigned char>(msg->data[i]);
@@ -178,13 +179,12 @@ void Costmap2DClient::updatePartialMap(
   size_t y0 = static_cast<size_t>(msg->y);
   size_t xn = msg->width + x0;
   size_t yn = msg->height + y0;
-  auto costmap = costmap_->getCostmap();
   // lock as we are accessing raw underlying map
-  auto* mutex = costmap->getMutex();
+  auto* mutex = costmap_.getMutex();
   std::lock_guard<nav2_costmap_2d::Costmap2D::mutex_t> lock(*mutex);
 
-  size_t costmap_xn = costmap->getSizeInCellsX();
-  size_t costmap_yn = costmap->getSizeInCellsY();
+  size_t costmap_xn = costmap_.getSizeInCellsX();
+  size_t costmap_yn = costmap_.getSizeInCellsY();
 
   if (xn > costmap_xn || x0 > costmap_xn || yn > costmap_yn ||
       y0 > costmap_yn) {
@@ -196,11 +196,11 @@ void Costmap2DClient::updatePartialMap(
   }
 
   // update map with data
-  unsigned char* costmap_data = costmap->getCharMap();
+  unsigned char* costmap_data = costmap_.getCharMap();
   size_t i = 0;
   for (size_t y = y0; y < yn && y < costmap_yn; ++y) {
     for (size_t x = x0; x < xn && x < costmap_xn; ++x) {
-      size_t idx = costmap->getIndex(x, y);
+      size_t idx = costmap_.getIndex(x, y);
       unsigned char cell_cost = static_cast<unsigned char>(msg->data[i]);
       costmap_data[idx] = cost_translation_table__[cell_cost];
       ++i;

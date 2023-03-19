@@ -76,9 +76,9 @@ public:
    *
    * This pointer will stay the same for the lifetime of Costmap2DClient object.
    */
-  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> getCostmap()
+  nav2_costmap_2d::Costmap2D * getCostmap()
   {
-    return costmap_;
+    return &costmap_;
   }
 
   /**
@@ -87,9 +87,9 @@ public:
    *
    * This pointer will stay the same for the lifetime of Costmap2DClient object.
    */
-  const std::shared_ptr<nav2_costmap_2d::Costmap2DROS> getCostmap() const
+  const nav2_costmap_2d::Costmap2D * getCostmap() const
   {
-    return costmap_;
+    return &costmap_;
   }
 
   /**
@@ -114,11 +114,11 @@ protected:
   void updateFullMap(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
   void updatePartialMap(const map_msgs::msg::OccupancyGridUpdate::SharedPtr msg);
 
-  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_;
+  nav2_costmap_2d::Costmap2D costmap_;
   bool costmap_received_ = false;  ///< @brief Flag indicating whether costmap
                                    ///< callback has been called
 
-  std::shared_ptr<tf2_ros::Buffer> tf_;  ///< @brief Used for transforming
+  const tf2_ros::Buffer * tf_;  ///< @brief Used for transforming
                                      /// point clouds
   rclcpp::Node& node_;
   std::string global_frame_;      ///< @brief The global frame for the costmap
