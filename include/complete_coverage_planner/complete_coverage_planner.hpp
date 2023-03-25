@@ -19,12 +19,14 @@
 
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "nav2_msgs/action/navigate_to_pose.hpp"
+#include "nav2_msgs/action/navigate_through_poses.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 
 #include "complete_coverage_planner/costmap_client.hpp"
 
 using namespace std::placeholders;
-#define ACTION_NAME "navigate_to_pose"
+#define NAV_POSE_ACTION "navigate_to_pose"
+#define NAV_TO_POSES_ACTION "navigate_through_poses"
 namespace complete_coverage_planner
 {
 /**
@@ -34,9 +36,9 @@ namespace complete_coverage_planner
  */
 class CompleteCoverage : public rclcpp::Node
 {
+  //using NavigateThroughPose = nav2_msgs::action::NavigateThroughPoses;
   using NavigateToPose = nav2_msgs::action::NavigateToPose;
-  using GoalHandleNavigateToPose = rclcpp_action::ClientGoalHandle<NavigateToPose>;
-  rclcpp_action::Client<NavigateToPose>::SharedPtr client_ptr_;
+  using ActionT = nav2_msgs::action::NavigateToPose;
 public:
   CompleteCoverage();
   ~CompleteCoverage();
@@ -45,6 +47,7 @@ void stop();
 
   using NavigationGoalHandle =
       rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>;
+  using Feedback = typename ActionT::Feedback;
 
 private:
   /**
@@ -57,7 +60,6 @@ private:
   //  */
 
   bool goalOnBlacklist(const geometry_msgs::msg::Point& goal);
-
   NavigationGoalHandle::SharedPtr navigation_goal_handle_;
   // void
   // goal_response_callback(std::shared_future<NavigationGoalHandle::SharedPtr>
@@ -67,7 +69,7 @@ private:
   void resumeCallback(const std_msgs::msg::Bool::SharedPtr msg);
   //used to start and stop navigation
   void start(const std_msgs::msg::Bool::SharedPtr msg);
-  void feedbackCallback(CompleteCoverage::SharedPtr,const std::shared_ptr<const NavigateToPose::Feedback> feedback);
+  void feedbackCallback(std::shared_ptr<const nav2_msgs::action::NavigateToPose_Feedback_<std::allocator<void>>> );
 
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
       marker_array_publisher_;

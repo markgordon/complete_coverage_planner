@@ -32,7 +32,7 @@ CompleteCoverage::CompleteCoverage()
 
   move_base_client_ =
       rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(
-          this, ACTION_NAME);
+          this, "navigate_to_pose");
 
   if (visualize) {
     marker_array_publisher_ =
@@ -96,34 +96,44 @@ void CompleteCoverage::makePlan()
   //Now we have to feed the waypoints in one at a time so our "smart" path planner doesn't shortcut tracks
   
   RCLCPP_DEBUG(logger_, "total poses %d",complete_path.poses.size());
-
+  //std::vector<geometry_msgs::msg::PoseStamped> poses;
+  auto nav_poses = nav2_msgs::action::NavigateThroughPoses::Goal();
   for(auto waypoint: complete_path.poses)
   {
-    std::mutex lk;
-    std::unique_lock<std::mutex> ulk(lk);
-    //if stopped mid path
-    if(!start_){
-      RCLCPP_DEBUG(logger_, "stop set, stopping");
-      stop();
-      return;
-    }
-    //pause feature
-    while(!continue_){
-      RCLCPP_DEBUG(logger_, "pause set, waiting for continue");
-      continue_condition_.wait(ulk);
-    }
-    //save for debug logging
-    prev_goal_ = waypoint.pose.position;  
-    RCLCPP_DEBUG(logger_, "Sending next goal to move base nav2");
-    auto goal = nav2_msgs::action::NavigateToPose::Goal();
-    goal.pose.pose = waypoint.pose;
-    goal.pose.header.frame_id = map_frame_;
-    goal.pose.header.stamp = this->now();
-    auto send_goal_options =
-        rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
-    send_goal_options.result_callback =
-      std::bind(&CompleteCoverage::reachedGoal, this, _1);
-    move_base_client_->async_send_goal(goal, send_goal_options);
+    geometry_msgs::msg::PoseStamped goal;
+    goal.pose = waypoint.pose;
+    goal.header.frame_id = map_frame_;
+    goal.header.stamp = this->now();
+    nav2_msgs::action::NavigateToPose::Goal navgoal;
+    navgoal.pose = goal;
+   // nav_poses.poses.push_back(goal);
+  std::mutex lk;
+  std::unique_lock<std::mutex> ulk(lk);
+  //if stopped mid path
+  if(!start_){
+    RCLCPP_DEBUG(logger_, "stop set, stopping");
+    stop();
+    return;
+  }
+  //pause feature
+  while(!continue_){
+    RCLCPP_DEBUG(logger_, "pause set, waiting for continue");
+    continue_condition_.wait(ulk);
+  }
+  //save for debug logging
+  RCLCPP_DEBUG(logger_, "Sending goals to move base nav2");
+  auto send_goal_options =
+      rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
+  send_goal_options.result_callback =
+    [this](const NavigationGoalHandle::WrappedResult& result) {
+      reachedGoal(result);
+    };
+    send_goal_options.feedback_callback =
+      [this]( std::shared_ptr<rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>>,
+       std::shared_ptr<const nav2_msgs::action::NavigateToPose_Feedback_<std::allocator<void>>> fb){
+          feedbackCallback(fb);
+       };
+    move_base_client_->async_send_goal(navgoal, send_goal_options);
 
     //now wait for some response from the action, hopefully goal completed
     while(waypoint_status_ == rclcpp_action::ResultCode::UNKNOWN)
@@ -146,6 +156,10 @@ void CompleteCoverage::makePlan()
     }
   }
   if(return_to_init_)returnToInitialPose();
+}
+void CompleteCoverage::feedbackCallback(std::shared_ptr<const nav2_msgs::action::NavigateToPose_Feedback_<std::allocator<void>>> fb) 
+{
+    RCLCPP_INFO(logger_,"Resume set to %lf",fb->distance_remaining);
 }
 void CompleteCoverage::resumeCallback(const std_msgs::msg::Bool::SharedPtr msg)
 {
@@ -174,10 +188,7 @@ CompleteCoverage::~CompleteCoverage()
 }
 
 
-void CompleteCoverage::feedbackCallback(CompleteCoverage::SharedPtr,const std::shared_ptr<const NavigateToPose::Feedback> feedback)
-{
-  RCLCPP_INFO(get_logger(), "Distance remaining = %f", feedback->distance_remaining);
-}
+
 void CompleteCoverage::returnToInitialPose()
 {
   RCLCPP_INFO(logger_, "Returning to initial pose.");
@@ -197,7 +208,7 @@ void CompleteCoverage::reachedGoal(const NavigationGoalHandle::WrappedResult& re
   waypoint_status_ = result.code;
   switch (result.code) {
 
-    RCLCPP_DEBUG(logger_, "Status received for point: x:%lf,y:%lf,z:%lf",prev_goal_.x,prev_goal_.y,prev_goal_.z);
+    RCLCPP_INFO(logger_, "Status received for point: x:%lf,y:%lf,z:%lf",prev_goal_.x,prev_goal_.y,prev_goal_.z);
     case rclcpp_action::ResultCode::SUCCEEDED:
       RCLCPP_INFO(logger_, "Goal was successful");
       break;
