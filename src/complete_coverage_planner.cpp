@@ -71,124 +71,81 @@ CompleteCoverage::CompleteCoverage()
       return_to_init_ = false;
     }
   }
-  try{
-    while(1) {
-      if(start_) makePlan();
-      else {
-        std::mutex lk;
-        std::unique_lock<std::mutex> ulk(lk);
-        start_condition_.wait(ulk);
-      }
-    }
-  }catch(const std::exception &e){
-    RCLCPP_ERROR(logger_, "Exception while planning %s",e.what());
-  }
+    compute_plan();
+    path_timer_ = this->create_wall_timer(
+        std::chrono::milliseconds((uint16_t)(1000.0 / planner_frequency_)),
+        [this]() { do_plan(); });
+    // Start exploration right away
+    path_timer_->execute_callback();
 
 }
+void CompleteCoverage::do_plan(){
+    auto nav_poses = nav2_msgs::action::NavigateThroughPoses::Goal();
+    //if we are not paused or stopped, send next waypoint
+    if(start_ && continue_) {
+      nav2_msgs::action::NavigateToPose::Goal navgoal;
+      navgoal.pose = complete_path_.poses[current_pose_index_];
+      RCLCPP_DEBUG(logger_, "Sending goal to move base nav2");
+      auto send_goal_options =
+          rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
+      send_goal_options.result_callback =
+        [this](const NavigationGoalHandle::WrappedResult& result) {
+          reachedGoal(result);
+        };
+      send_goal_options.feedback_callback =
+        [this]( std::shared_ptr<rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>>,
+        std::shared_ptr<const nav2_msgs::action::NavigateToPose_Feedback_<std::allocator<void>>> fb){
+            feedbackCallback(fb);
+        };
+      move_base_client_->async_send_goal(navgoal, send_goal_options);
+    }
+}
 
-void CompleteCoverage::makePlan()
+void CompleteCoverage::compute_plan()
 {
   SpiralSTC spiral_path_builder;
   
   spiral_path_builder.configure(this,"complete_coverage_planner",costmap_client_.getCostmap(),map_frame_);
   //This creates the complete coverage path
-  nav_msgs::msg::Path complete_path = spiral_path_builder.createPlan(initial_pose_);
+  complete_path_ = spiral_path_builder.createPlan(initial_pose_);
   //Now we have to feed the waypoints in one at a time so our "smart" path planner doesn't shortcut tracks
   
-  RCLCPP_DEBUG(logger_, "total poses %d",complete_path.poses.size());
+  RCLCPP_INFO(logger_, "Total poses %d",complete_path_.poses.size());
   //std::vector<geometry_msgs::msg::PoseStamped> poses;
-  auto nav_poses = nav2_msgs::action::NavigateThroughPoses::Goal();
-  for(auto waypoint: complete_path.poses)
-  {
-    geometry_msgs::msg::PoseStamped goal;
-    goal.pose = waypoint.pose;
-    goal.header.frame_id = map_frame_;
-    goal.header.stamp = this->now();
-    nav2_msgs::action::NavigateToPose::Goal navgoal;
-    navgoal.pose = goal;
-   // nav_poses.poses.push_back(goal);
-  std::mutex lk;
-  std::unique_lock<std::mutex> ulk(lk);
-  //if stopped mid path
-  if(!start_){
-    RCLCPP_DEBUG(logger_, "stop set, stopping");
-    stop();
-    return;
-  }
-  //pause feature
-  while(!continue_){
-    RCLCPP_DEBUG(logger_, "pause set, waiting for continue");
-    continue_condition_.wait(ulk);
-  }
-  //save for debug logging
-  RCLCPP_DEBUG(logger_, "Sending goals to move base nav2");
-  auto send_goal_options =
-      rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
-  send_goal_options.result_callback =
-    [this](const NavigationGoalHandle::WrappedResult& result) {
-      reachedGoal(result);
-    };
-    send_goal_options.feedback_callback =
-      [this]( std::shared_ptr<rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>>,
-       std::shared_ptr<const nav2_msgs::action::NavigateToPose_Feedback_<std::allocator<void>>> fb){
-          feedbackCallback(fb);
-       };
-    move_base_client_->async_send_goal(navgoal, send_goal_options);
-
-    //now wait for some response from the action, hopefully goal completed
-    while(waypoint_status_ == rclcpp_action::ResultCode::UNKNOWN)
-    {
-      continue_condition_.wait(ulk);
-    }
-    switch(waypoint_status_)
-    {
-      //continue processing waypoints
-        case rclcpp_action::ResultCode::SUCCEEDED:
-          break;
-        case rclcpp_action::ResultCode::ABORTED:
-        case rclcpp_action::ResultCode::CANCELED:
-        case rclcpp_action::ResultCode::UNKNOWN:
-        //quite and move to start if requested
-          stop();
-        //wait for new start to replan and start again
-          start_ = false;
-          return;
-    }
-  }
-  if(return_to_init_)returnToInitialPose();
+  //reset to first pose in plan for path execution
+  current_pose_index_ = 0;
 }
 void CompleteCoverage::feedbackCallback(std::shared_ptr<const nav2_msgs::action::NavigateToPose_Feedback_<std::allocator<void>>> fb) 
 {
+  //update the time to next plan check based on the estimate of time to completion for the current goal 
     RCLCPP_INFO(logger_,"Resume set to %lf",fb->distance_remaining);
 }
 void CompleteCoverage::resumeCallback(const std_msgs::msg::Bool::SharedPtr msg)
 {
-
     continue_=msg->data;
     RCLCPP_INFO(logger_,"Resume set to %s",continue_ ?"true":"false");
     //if this is an resume, notify any waits
-    if(continue_) continue_condition_.notify_all();
+    do_plan();
 }
 
 void CompleteCoverage::start(const std_msgs::msg::Bool::SharedPtr msg)
 {
   start_ = msg->data;
   std::string starting;
-  if(start_) starting = "starting.";
-  else starting = "stopping.";
-  RCLCPP_INFO(logger_, "Exploration %s",start_?"true":"false");
-  //if starting signal
-  if(start_){
-    start_condition_.notify_all();
+  if(start_) {
+    starting = "starting.";
+    do_plan();
   }
+  else {
+    starting = "stopping.";
+    stop();
+  }
+  RCLCPP_INFO(logger_, "Exploration %s",start_?"true":"false");
 }
 CompleteCoverage::~CompleteCoverage()
 {
   stop();
 }
-
-
-
 void CompleteCoverage::returnToInitialPose()
 {
   RCLCPP_INFO(logger_, "Returning to initial pose.");
@@ -208,21 +165,24 @@ void CompleteCoverage::reachedGoal(const NavigationGoalHandle::WrappedResult& re
   waypoint_status_ = result.code;
   switch (result.code) {
 
-    RCLCPP_INFO(logger_, "Status received for point: x:%lf,y:%lf,z:%lf",prev_goal_.x,prev_goal_.y,prev_goal_.z);
+    RCLCPP_DEBUG(logger_, "Status received for point: x:%lf,y:%lf,z:%lf",prev_goal_.x,prev_goal_.y,prev_goal_.z);
     case rclcpp_action::ResultCode::SUCCEEDED:
-      RCLCPP_INFO(logger_, "Goal was successful");
+    //execute next waypoint
+      current_pose_index_++;
+      if(!start_)stop();
+      if(continue_)
+          do_plan();
+      RCLCPP_DEBUG(logger_, "Goal was successful");
       break;
     case rclcpp_action::ResultCode::ABORTED:
-      RCLCPP_INFO(logger_, "Goal was aborted");
-      // If it was aborted probably because we've found another frontier goal,
-      // so just return and don't make plan again
+      RCLCPP_DEBUG(logger_, "Goal was aborted");
+      stop();
       return;
     case rclcpp_action::ResultCode::CANCELED:
-      RCLCPP_INFO(logger_, "Goal was canceled");
-      // If goal canceled might be because exploration stopped from topic. Don't make new plan.
+      RCLCPP_DEBUG(logger_, "Goal was canceled");
+      stop();
       return;
     default:
-    //OK, so since we are in an unknown state but we did get a response, conservatively cancel the operation
       waypoint_status_ =  rclcpp_action::ResultCode::CANCELED;
       RCLCPP_WARN(logger_, "Unknown result code from move base nav2");
       break;

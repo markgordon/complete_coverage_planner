@@ -21,6 +21,7 @@
 #include "nav2_msgs/action/navigate_to_pose.hpp"
 #include "nav2_msgs/action/navigate_through_poses.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
+#include <nav_msgs/msg/path.hpp>
 
 #include "complete_coverage_planner/costmap_client.hpp"
 
@@ -51,9 +52,17 @@ void stop();
 
 private:
   /**
-   * @brief  Make a global plan
+   * @brief  Execute Plane
    */
-  void makePlan();
+  void do_plan();
+    /**
+   * @brief  Make a complete coverage plan
+   */
+  void compute_plan();
+  /**
+   * @brief  Send a goal to the nav system
+   */  
+  void send_goal();
 
   // /**
   //  * @brief  Publish a frontiers as markers
@@ -80,7 +89,7 @@ private:
   Costmap2DClient costmap_client_;
   rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SharedPtr
       move_base_client_;
-  rclcpp::TimerBase::SharedPtr exploring_timer_;
+  rclcpp::TimerBase::SharedPtr path_timer_;
   // rclcpp::TimerBase::SharedPtr oneshot_;
 
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr resume_subscription_;
@@ -101,10 +110,17 @@ private:
   std::condition_variable start_condition_;
   //used to signal the final status of the last waypoint
   std::condition_variable goal_status_condition_;
+  //how often to check status of plan execution
+  double planner_frequency_ = 1.0;
 
   //this is used to drop out of a path mid journey
   bool continue_ = true;
   bool start_ = true;
+  //the calculated path for coverage
+  nav_msgs::msg::Path complete_path_;
+  //the current pose index
+  size_t current_pose_index_;
+  //current feedback for goal
   rclcpp_action::ResultCode waypoint_status_;
   //mutexes for message signalling to primary path navigator
   
