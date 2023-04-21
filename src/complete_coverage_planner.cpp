@@ -72,12 +72,7 @@ CompleteCoverage::CompleteCoverage()
     }
   }
     compute_plan();
-    path_timer_ = this->create_wall_timer(
-        std::chrono::milliseconds((uint16_t)(1000.0 / planner_frequency_)),
-        [this]() { do_plan(); });
-    // Start exploration right away
-    path_timer_->execute_callback();
-
+    do_plan();
 }
 void CompleteCoverage::do_plan(){
     auto nav_poses = nav2_msgs::action::NavigateThroughPoses::Goal();
@@ -85,7 +80,9 @@ void CompleteCoverage::do_plan(){
     if(start_ && continue_) {
       nav2_msgs::action::NavigateToPose::Goal navgoal;
       navgoal.pose = complete_path_.poses[current_pose_index_];
-      RCLCPP_DEBUG(logger_, "Sending goal to move base nav2");
+      navgoal.pose.header.frame_id = costmap_client_.getGlobalFrameID();
+      navgoal.pose.header.stamp = this->now();
+      RCLCPP_INFO(logger_, "Sending goal to move base nav2");
       auto send_goal_options =
           rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
       send_goal_options.result_callback =
@@ -110,7 +107,7 @@ void CompleteCoverage::compute_plan()
   complete_path_ = spiral_path_builder.createPlan(initial_pose_);
   //Now we have to feed the waypoints in one at a time so our "smart" path planner doesn't shortcut tracks
   
-  RCLCPP_INFO(logger_, "Total poses %d",complete_path_.poses.size());
+  RCLCPP_INFO(logger_, "Total poses %ld",complete_path_.poses.size());
   //std::vector<geometry_msgs::msg::PoseStamped> poses;
   //reset to first pose in plan for path execution
   current_pose_index_ = 0;
@@ -118,14 +115,17 @@ void CompleteCoverage::compute_plan()
 void CompleteCoverage::feedbackCallback(std::shared_ptr<const nav2_msgs::action::NavigateToPose_Feedback_<std::allocator<void>>> fb) 
 {
   //update the time to next plan check based on the estimate of time to completion for the current goal 
-    RCLCPP_INFO(logger_,"Resume set to %lf",fb->distance_remaining);
+    //RCLCPP_INFO(logger_,"Resume set to %lf",fb->distance_remaining);
 }
 void CompleteCoverage::resumeCallback(const std_msgs::msg::Bool::SharedPtr msg)
 {
-    continue_=msg->data;
-    RCLCPP_INFO(logger_,"Resume set to %s",continue_ ?"true":"false");
+    if(continue_!=msg->data)
+    {
+      continue_ = msg->data;
+      if(continue_) do_plan();
+    }
+    //RCLCPP_INFO(logger_,"Resume set to %s",continue_ ?"true":"false");
     //if this is an resume, notify any waits
-    do_plan();
 }
 
 void CompleteCoverage::start(const std_msgs::msg::Bool::SharedPtr msg)
@@ -165,21 +165,21 @@ void CompleteCoverage::reachedGoal(const NavigationGoalHandle::WrappedResult& re
   waypoint_status_ = result.code;
   switch (result.code) {
 
-    RCLCPP_DEBUG(logger_, "Status received for point: x:%lf,y:%lf,z:%lf",prev_goal_.x,prev_goal_.y,prev_goal_.z);
+    RCLCPP_INFO(logger_, "Status received for point: x:%lf,y:%lf,z:%lf",prev_goal_.x,prev_goal_.y,prev_goal_.z);
     case rclcpp_action::ResultCode::SUCCEEDED:
     //execute next waypoint
       current_pose_index_++;
       if(!start_)stop();
       if(continue_)
           do_plan();
-      RCLCPP_DEBUG(logger_, "Goal was successful");
+      RCLCPP_INFO(logger_, "Goal was successful");
       break;
     case rclcpp_action::ResultCode::ABORTED:
-      RCLCPP_DEBUG(logger_, "Goal was aborted");
+      RCLCPP_INFO(logger_, "Goal was aborted");
       stop();
       return;
     case rclcpp_action::ResultCode::CANCELED:
-      RCLCPP_DEBUG(logger_, "Goal was canceled");
+      RCLCPP_INFO(logger_, "Goal was canceled");
       stop();
       return;
     default:

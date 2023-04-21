@@ -13,12 +13,8 @@ def generate_launch_description():
     config = os.path.join(
         get_package_share_directory("complete_coverage_planner"), "config", "params_costmap.yaml"
     )
-    log_level_arg = DeclareLaunchArgument(
-        "log-level",
-        default_value=["debug"],
-        description="Logging level",
-    )
-    log_level = LaunchConfiguration("log-level")
+   
+    log_level = "info"
 
     use_sim_time = LaunchConfiguration("use_sim_time")
     namespace = LaunchConfiguration("namespace")

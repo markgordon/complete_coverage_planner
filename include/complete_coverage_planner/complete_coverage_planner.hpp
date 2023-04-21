@@ -52,23 +52,13 @@ void stop();
 
 private:
   /**
-   * @brief  Execute Plane
+   * @brief  Execute Plan
    */
   void do_plan();
     /**
    * @brief  Make a complete coverage plan
    */
   void compute_plan();
-  /**
-   * @brief  Send a goal to the nav system
-   */  
-  void send_goal();
-
-  // /**
-  //  * @brief  Publish a frontiers as markers
-  //  */
-
-  bool goalOnBlacklist(const geometry_msgs::msg::Point& goal);
   NavigationGoalHandle::SharedPtr navigation_goal_handle_;
   // void
   // goal_response_callback(std::shared_future<NavigationGoalHandle::SharedPtr>
